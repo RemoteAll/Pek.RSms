@@ -1,0 +1,50 @@
+# Pek.RSms 短信配置（TOML）
+#
+# 本文件由 Pek.RSms 生成与维护：首次生成即带全部字段说明；
+# 通过程序修改配置值时，注释与排版会被保留；也可直接编辑（支持注释），保存后自动热加载。
+#
+# 对应 C# `Pek.Sms` 的 `Sms` 配置（字段名保持一致，便于迁移与对照）。
+
+# 是否启用代理（目前仅烽火支持；本地调试访问限制 IP 的平台时使用）
+EnableProxy = false
+# 代理服务器地址。例如：https://proxy.0ht.cn
+ProxyUrl = ""
+# 代理服务器认证令牌。用于 X-Token-Code 请求头
+ProxyToken = ""
+
+# 短信账号（可多条；同一 SmsType 按 Order 升序依次尝试，失败自动切换下一个）
+#
+# Code：惟一标识（可自行命名）
+# Name：服务商标识：aliyun / tencent / fenghuo / lianlu
+# DisplayName：显示名称
+# SmsType：0=国内通知，1=国际通知，2=国内营销，3=国际营销
+# IsDefault：是否默认（与 SmsType 搭配，同一类型建议只设一个）
+# IsEnabled：是否启用（未启用账号不参与发送与兜底）
+# AccessKey / AccessSecret：服务商凭证（阿里云 AccessKeyId/Secret、腾讯云 SecretId/Key、烽火用户名/密码、连陆用户ID/密钥）
+# SignName：签名（阿里云/腾讯云必填；烽火/连陆按平台要求）
+# Order：兜底顺序（越小越先；建议：烽火 10 / 阿里云 20 / 腾讯云 30 / 连陆 40）
+# Timeout：请求超时（毫秒，默认 60000）
+# Security：是否使用 HTTPS（阿里云/腾讯云默认 true；连陆默认 false）
+# RetryTimes：请求重试次数（默认 3，含首次尝试）
+# ExtendFields：扩展字段说明（仅作文档/面板展示）
+# ExtendData：扩展内容（JSON 字符串），各服务商可用键见下：
+#   aliyun  ：TemplateCode（默认模板）、BaseUrl、InsecureTls、OutId
+#   tencent ：SdkAppId（必填）、TemplateId、CountryCode（默认 +86）、Region、BaseUrl、Host、InsecureTls
+#   fenghuo ：BaseUrl（默认 https://aisms.aipaas.com:8443）、InsecureTls
+#   lianlu  ：BaseUrl（默认 http://47.110.199.86:8081）、InsecureTls
+[[Data]]
+Code = "fenghuo_notify"
+Name = "fenghuo"
+DisplayName = "烽火通知短信"
+SmsType = 0
+IsDefault = true
+IsEnabled = false
+AccessKey = ""
+AccessSecret = ""
+SignName = ""
+Order = 10
+Timeout = 60000
+Security = true
+RetryTimes = 3
+ExtendFields = ""
+ExtendData = '{"BaseUrl": "https://aisms.aipaas.com:8443"}'

@@ -1,0 +1,35 @@
+[package]
+name = "pek-rsms"
+version = "0.1.0"
+edition = "2024"
+description = "Pek 短信发送库（Rust）：阿里云/腾讯云/烽火/连陆，统一参数与多账号 Order 兜底（对齐 C# Pek.Sms）"
+authors = ["PeiKeSmart"]
+license = "MIT"
+
+[dependencies]
+# DH 基础库：TOML 配置（TomlConfig）、HTTP（http_client）、日志、签名、随机/时间、URL 编码
+dhrust = { path = "../DH.RustBase", features = ["toml", "http-client", "http-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+# 仅用于腾讯云签名的 UTC 日期格式化（dhrust 已依赖 chrono，避免重复实现）
+chrono = "0.4"
+
+[features]
+# 与服务商分包对齐：默认包含四家；消费方可裁剪
+default = ["aliyun", "tencent", "fenghuo", "lianlu"]
+aliyun = []
+tencent = []
+fenghuo = []
+lianlu = []
+
+[profile.release]
+lto = "thin"
+strip = true
+incremental = true
+
+# 日常调测档（与生态各仓一致）：继承 release 的优化等级，但关闭 LTO、并行 codegen + 增量
+[profile.fast]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true
