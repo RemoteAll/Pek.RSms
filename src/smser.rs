@@ -68,6 +68,9 @@ impl Smser {
     }
 
     /// 外部修改配置后热加载；返回提示文本（空 = 未变化/纯内存模式）。
+    ///
+    /// 注意：本方法每次都会读取文件元数据（Windows 实测约 49µs），请按秒级/文件监听调用，
+    /// 不要放在每条短信的发送路径上。
     pub fn reload_if_changed(&self) -> Vec<String> {
         let notes = self.store.reload_if_changed();
         for note in &notes {
@@ -103,6 +106,8 @@ impl Smser {
     }
 
     /// 指定账号 Code 发送（不兜底；失败返回 [`SmsError::Provider`]）。
+    ///
+    /// 与 C# `FindByCode` 一致：**不检查 `IsEnabled`**（显式指定账号即视为调用方已知晓）。
     pub fn send_with_code(&self, code: &str, request: &SmsRequest) -> Result<SmsResult, SmsError> {
         let settings = self.settings();
         let account = settings
@@ -112,12 +117,13 @@ impl Smser {
         let label = account.label().to_string();
         let client = create_client_owned(account, &settings)?;
         let result = client.send(request);
+        let mobiles = request.mobiles_string();
         if result.success {
             dhrust::info!(
                 "短信发送成功：账号={} 服务商={} 手机号={}",
                 label,
                 result.provider,
-                request.mobiles_string()
+                mobiles
             );
             Ok(result)
         } else {
@@ -159,7 +165,7 @@ impl Smser {
         request: SmsRequest,
     ) -> JoinHandle<Result<SmsResult, SmsError>> {
         let this = Arc::clone(self);
-        std::thread::spawn(move || this.send(sms_type, &request))
+        dhrust::threading::spawn_named("pek-rsms-send", move || this.send(sms_type, &request))
     }
 
     fn send_accounts(
@@ -177,6 +183,7 @@ impl Smser {
         }
 
         let mut failures = Vec::new();
+        let mobiles = request.mobiles_string();
         for account in accounts {
             let label = account.label().to_string();
             let provider_name = account.name.clone();
@@ -200,7 +207,7 @@ impl Smser {
                     "短信发送成功：服务商={} 账号={} 手机号={} 结果={}",
                     result.provider,
                     label,
-                    request.mobiles_string(),
+                    mobiles,
                     result.message
                 );
                 return Ok(result);

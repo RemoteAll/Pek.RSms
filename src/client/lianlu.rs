@@ -45,6 +45,7 @@ impl SmsClient for LianLuSmsClient {
             return invalid_result(Self::NAME, "密钥（AccessSecret）不能为空");
         }
         if config.sign_name.trim().is_empty() {
+            // 与 C# 一致：校验配置完整性，但连陆请求体不使用 SignName 字段
             return invalid_result(Self::NAME, "签名（SignName）不能为空");
         }
         if !request.has_mobiles() {

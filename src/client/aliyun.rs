@@ -83,7 +83,7 @@ impl SmsClient for AliyunSmsClient {
         params.insert("SignatureMethod".into(), "HMAC-SHA1".into());
         params.insert("SignatureNonce".into(), dhrust::random::token());
         params.insert("SignatureVersion".into(), "1.0".into());
-        params.insert("Timestamp".into(), iso8601_utc());
+        params.insert("Timestamp".into(), dhrust::times::iso8601_utc());
         params.insert("Format".into(), "JSON".into());
 
         if !request.template_params.is_empty() {
@@ -151,12 +151,6 @@ pub fn string_to_sign(params: &BTreeMap<String, String>) -> String {
             .map(|(key, value)| (key.as_str(), value.as_str())),
     );
     format!("POST&%2F&{}", dhrust::web::url_encode(&canonical))
-}
-
-fn iso8601_utc() -> String {
-    dhrust::times::now_utc()
-        .format("%Y-%m-%dT%H:%M:%SZ")
-        .to_string()
 }
 
 fn parse_response(text: &str, status: u16) -> SmsResult {

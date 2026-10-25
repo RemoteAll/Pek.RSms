@@ -75,6 +75,8 @@ impl SmsType {
 #[derive(Debug, Clone, Default)]
 pub struct SmsRequest {
     /// 手机号列表（构造时会拆分 `,` `;` `|` `，` `；` 并去重/去空白）
+    ///
+    /// 直接修改本字段不会自动去重；需要规范化请使用 [`Self::new`] / [`Self::from_numbers`]。
     pub mobiles: Vec<String>,
     /// 短信内容（无模板直发时使用）
     pub content: String,
@@ -206,11 +208,7 @@ impl SmsRequest {
 
     /// 按 `{%key%}` 占位符渲染内容（烽火无模板直发时使用；无参数时原样返回）。
     pub fn render_content(&self) -> String {
-        let mut text = self.content.clone();
-        for (key, value) in &self.template_params {
-            text = text.replace(&format!("{{%{key}%}}"), value);
-        }
-        text
+        dhrust::text::replace_named(&self.content, &self.template_params, "{%", "%}")
     }
 
     /// 补齐模板 ID：请求为空时用配置默认值（对齐 C# `FixParameters`）。
@@ -229,21 +227,13 @@ impl SmsRequest {
 
 /// 手机号拆分：`,` `;` `|` `，` `；` 分隔，去空白、去重（保持首次出现顺序）。
 pub fn split_phone_numbers(text: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut seen = HashSet::new();
-    push_phone_numbers(text, &mut out, &mut seen);
-    out
+    dhrust::text::split_phone_numbers(text)
 }
 
 fn push_phone_numbers(text: &str, out: &mut Vec<String>, seen: &mut HashSet<String>) {
-    for part in text.split([',', ';', '|', '，', '；']) {
-        let number = part.trim();
-        if number.is_empty() {
-            continue;
-        }
-        let owned = number.to_string();
-        if seen.insert(owned.clone()) {
-            out.push(owned);
+    for number in dhrust::text::split_phone_numbers(text) {
+        if seen.insert(number.clone()) {
+            out.push(number);
         }
     }
 }

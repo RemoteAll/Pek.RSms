@@ -11,8 +11,6 @@ license = "MIT"
 dhrust = { path = "../DH.RustBase", features = ["toml", "http-client", "http-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-# 仅用于腾讯云签名的 UTC 日期格式化（dhrust 已依赖 chrono，避免重复实现）
-chrono = "0.4"
 
 [features]
 # 与服务商分包对齐：默认包含四家；消费方可裁剪

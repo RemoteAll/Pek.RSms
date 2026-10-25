@@ -112,13 +112,19 @@ pub struct ExtendView {
 impl ExtendView {
     /// 解析 JSON 对象（空/非法/非对象 → 空视图，不报错）。
     pub fn parse(text: &str) -> Self {
+        Self::try_parse(text).unwrap_or_default()
+    }
+
+    /// 解析 JSON 对象；空串返回空视图，非法/非对象返回错误文本。
+    pub fn try_parse(text: &str) -> Result<Self, String> {
         let text = text.trim();
         if text.is_empty() {
-            return Self::default();
+            return Ok(Self::default());
         }
         match serde_json::from_str::<Value>(text) {
-            Ok(Value::Object(map)) => Self { map },
-            _ => Self::default(),
+            Ok(Value::Object(map)) => Ok(Self { map }),
+            Ok(_) => Err("ExtendData 不是 JSON 对象".to_string()),
+            Err(error) => Err(format!("ExtendData JSON 解析失败：{error}")),
         }
     }
 
@@ -240,7 +246,24 @@ impl SmsData {
 
     /// 构造一次解析视图（推荐在 `send` 开头调用一次）。
     pub fn extend_view(&self) -> ExtendView {
-        ExtendView::parse(&self.extend_data)
+        match self.try_extend_view() {
+            Ok(view) => view,
+            Err(error) => {
+                static WARNED: std::sync::Once = std::sync::Once::new();
+                WARNED.call_once(|| {
+                    dhrust::warn!(
+                        "短信账号 {} 的 ExtendData 无法解析（按空配置处理）：{error}",
+                        self.label()
+                    );
+                });
+                ExtendView::default()
+            }
+        }
+    }
+
+    /// 构造解析视图；非法 JSON/非对象返回错误。
+    pub fn try_extend_view(&self) -> Result<ExtendView, String> {
+        ExtendView::try_parse(&self.extend_data)
     }
 
     /// 解析 `ExtendData`（JSON 对象；为空或非法时返回空表）。
@@ -300,10 +323,15 @@ pub struct SmsSettings {
 
 impl std::fmt::Debug for SmsSettings {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let proxy_url = if self.proxy_url.contains('@') {
+            "***"
+        } else {
+            self.proxy_url.as_str()
+        };
         f.debug_struct("SmsSettings")
             .field("data", &self.data)
             .field("enable_proxy", &self.enable_proxy)
-            .field("proxy_url", &self.proxy_url)
+            .field("proxy_url", &proxy_url)
             .field("proxy_token", &"***")
             .finish()
     }
@@ -461,12 +489,14 @@ mod tests {
         };
         let settings = SmsSettings {
             data: vec![data],
+            proxy_url: "https://user:pass@proxy.example.com".into(),
             proxy_token: "proxy-secret".into(),
             ..SmsSettings::default()
         };
         let text = format!("{settings:?}");
         assert!(!text.contains("super-secret"), "{text}");
         assert!(!text.contains("proxy-secret"), "{text}");
+        assert!(!text.contains("user:pass"), "{text}");
         assert!(text.contains("***"), "{text}");
     }
 
@@ -484,5 +514,8 @@ mod tests {
         assert_eq!(view.base_url("fallback"), "https://example.com");
         assert!(!view.is_empty());
         assert!(SmsData::default().extend_view().is_empty());
+        assert!(ExtendView::try_parse("not-json").is_err());
+        assert!(ExtendView::try_parse("[1,2]").is_err());
+        assert!(ExtendView::try_parse("").unwrap().is_empty());
     }
 }

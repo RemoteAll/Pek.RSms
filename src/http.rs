@@ -17,11 +17,14 @@ use std::time::Duration;
     feature = "fenghuo",
     feature = "lianlu"
 ))]
-use dhrust::net::http_client::{HttpClientOptions, HttpResponse, blocking_request_auto_with};
+use dhrust::net::http_client::{
+    HttpClientOptions, HttpResponse, RetryPolicy, blocking_request_with_retry,
+};
 
 /// POST 请求（带重试）。
 ///
 /// - `attempts` 为总尝试次数（`<=1` 只发一次）；
+/// - 传输错误与 408/425/429/5xx 会重试，其余 4xx 不重试；
 /// - 失败重试间隔 200ms（仅失败时发生，不对空闲路径产生开销）。
 #[cfg(any(
     feature = "aliyun",
@@ -47,28 +50,20 @@ pub(crate) fn post(
         insecure_tls,
         ca_pem: None,
     };
+    let policy = RetryPolicy::new(attempts)
+        .with_delay(Duration::from_millis(200))
+        .with_statuses([408, 425, 429, 500, 502, 503, 504]);
 
-    let attempts = attempts.max(1);
-    let mut last_error = String::new();
-    for attempt in 0..attempts {
-        match blocking_request_auto_with(
-            "POST",
-            url,
-            &refs,
-            Some(content_type),
-            body.clone(),
-            options.clone(),
-        ) {
-            Ok(response) => return Ok(response),
-            Err(err) => {
-                last_error = err.to_string();
-                if attempt + 1 < attempts {
-                    std::thread::sleep(Duration::from_millis(200));
-                }
-            }
-        }
-    }
-    Err(last_error)
+    blocking_request_with_retry(
+        "POST",
+        url,
+        &refs,
+        Some(content_type),
+        body,
+        options,
+        &policy,
+    )
+    .map_err(|error| error.to_string())
 }
 
 /// 响应体文本（UTF-8 有损）。

@@ -5,10 +5,15 @@
 
 use serde_json::{Map, Value, json};
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use crate::client::{SmsClient, http_failure, invalid_result};
 use crate::http;
 use crate::message::{SmsRequest, SmsResult};
 use crate::settings::{SmsData, SmsSettings};
+
+/// 代理 `Id` 的进程内序号（毫秒时间戳相同也能区分）。
+static PROXY_ID_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// 默认 API 基础地址（不含 `/sms` 后缀）。
 pub const FENGHUO_DEFAULT_BASE_URL: &str = "https://aisms.aipaas.com:8443";
@@ -143,7 +148,11 @@ impl SmsClient for FengHuoSmsClient {
                 ("X-Target-Url".to_string(), base.clone()),
                 (
                     "Id".to_string(),
-                    dhrust::times::getmilltimestamp().to_string(),
+                    format!(
+                        "{}-{}",
+                        dhrust::times::getmilltimestamp(),
+                        PROXY_ID_SEQ.fetch_add(1, Ordering::Relaxed)
+                    ),
                 ),
             ];
             if !self.proxy_token.trim().is_empty() {

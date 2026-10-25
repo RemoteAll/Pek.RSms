@@ -81,14 +81,7 @@ impl SmsClient for TencentSmsClient {
         let phones: Vec<String> = request
             .mobiles
             .iter()
-            .map(|phone| {
-                let phone = phone.trim();
-                if phone.starts_with('+') {
-                    phone.to_string()
-                } else {
-                    format!("{country_code}{phone}")
-                }
-            })
+            .map(|phone| normalize_phone(phone, &country_code))
             .collect();
 
         let mut body = Map::new();
@@ -111,9 +104,7 @@ impl SmsClient for TencentSmsClient {
         }
         let payload = Value::Object(body).to_string();
 
-        let now = dhrust::times::now_utc();
-        let timestamp = now.and_utc().timestamp();
-        let date = now.format("%Y-%m-%d").to_string();
+        let (timestamp, date) = dhrust::times::utc_now_parts();
         let url = extend.base_url("https://sms.tencentcloudapi.com");
         let host = extend
             .str("Host")
@@ -159,10 +150,23 @@ impl SmsClient for TencentSmsClient {
     }
 }
 
-/// 从 URL 提取 authority（`host[:port]`）。
+/// 手机号归一化：`+` 开头保留；`00` 国际前缀转 `+`；其余拼接默认国家码。
+fn normalize_phone(phone: &str, country_code: &str) -> String {
+    let phone = phone.trim();
+    if phone.starts_with('+') {
+        phone.to_string()
+    } else if let Some(rest) = phone.strip_prefix("00") {
+        format!("+{rest}")
+    } else {
+        format!("{country_code}{phone}")
+    }
+}
+
+/// 从 URL 提取 authority（`host[:port]`；去掉 userinfo）。
 fn url_authority(url: &str) -> Option<String> {
     let rest = url.split_once("://").map(|(_, rest)| rest).unwrap_or(url);
     let authority = rest.split('/').next().unwrap_or_default().trim();
+    let authority = authority.rsplit('@').next().unwrap_or(authority);
     if authority.is_empty() {
         None
     } else {
@@ -312,6 +316,21 @@ mod tests {
         assert_eq!(
             authorization,
             "TC3-HMAC-SHA256 Credential=test-secret-id/2019-02-25/sms/tc3_request, SignedHeaders=content-type;host, Signature=9b67bb1c1bef7d2e9a88f7c09929bb210de7efe6afee46017897330808418b60"
+        );
+    }
+
+    #[test]
+    fn phone_and_authority_normalization() {
+        assert_eq!(normalize_phone("+8613800138000", "+86"), "+8613800138000");
+        assert_eq!(normalize_phone("008613800138000", "+86"), "+8613800138000");
+        assert_eq!(normalize_phone("13800138000", "+86"), "+8613800138000");
+        assert_eq!(
+            url_authority("https://user:pass@[::1]:8443/path").as_deref(),
+            Some("[::1]:8443")
+        );
+        assert_eq!(
+            url_authority("https://sms.tencentcloudapi.com/api").as_deref(),
+            Some("sms.tencentcloudapi.com")
         );
     }
 }
