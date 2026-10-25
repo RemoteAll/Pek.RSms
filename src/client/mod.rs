@@ -36,33 +36,34 @@ pub trait SmsClient: Send + Sync {
     fn send(&self, request: &SmsRequest) -> SmsResult;
 }
 
-/// 根据配置创建客户端。
+/// 根据配置创建客户端（内部克隆 `config`，保留旧签名）。
 pub fn create_client(
     config: &SmsData,
+    settings: &SmsSettings,
+) -> Result<Box<dyn SmsClient>, SmsError> {
+    create_client_owned(config.clone(), settings)
+}
+
+/// 根据配置创建客户端（**接管 `config`，不再二次克隆**）。
+///
+/// `Smser` 已把账号克隆进 `Vec` 时使用本函数；只有烽火需要 `settings`（代理），
+/// 其余三家不会克隆整份 `SmsSettings`。
+pub fn create_client_owned(
+    config: SmsData,
     _settings: &SmsSettings,
 ) -> Result<Box<dyn SmsClient>, SmsError> {
     let name = config.name.trim().to_ascii_lowercase();
     match name.as_str() {
         #[cfg(feature = "aliyun")]
-        "aliyun" | "aliyun_dysms" => Ok(Box::new(AliyunSmsClient::with_settings(
-            config.clone(),
-            _settings.clone(),
-        ))),
+        "aliyun" | "aliyun_dysms" => Ok(Box::new(AliyunSmsClient::new(config))),
         #[cfg(feature = "tencent")]
-        "tencent" | "tencentcloud" => Ok(Box::new(TencentSmsClient::with_settings(
-            config.clone(),
-            _settings.clone(),
-        ))),
+        "tencent" | "tencentcloud" => Ok(Box::new(TencentSmsClient::new(config))),
         #[cfg(feature = "fenghuo")]
-        "fenghuo" => Ok(Box::new(FengHuoSmsClient::with_settings(
-            config.clone(),
-            _settings.clone(),
+        "fenghuo" => Ok(Box::new(FengHuoSmsClient::from_settings_ref(
+            config, _settings,
         ))),
         #[cfg(feature = "lianlu")]
-        "lianlu" => Ok(Box::new(LianLuSmsClient::with_settings(
-            config.clone(),
-            _settings.clone(),
-        ))),
+        "lianlu" => Ok(Box::new(LianLuSmsClient::new(config))),
         other => Err(SmsError::UnsupportedProvider(other.to_string())),
     }
 }

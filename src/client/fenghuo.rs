@@ -17,7 +17,9 @@ pub const FENGHUO_DEFAULT_BASE_URL: &str = "https://aisms.aipaas.com:8443";
 #[derive(Debug, Clone)]
 pub struct FengHuoSmsClient {
     config: SmsData,
-    settings: SmsSettings,
+    enable_proxy: bool,
+    proxy_url: String,
+    proxy_token: String,
 }
 
 impl FengHuoSmsClient {
@@ -28,18 +30,30 @@ impl FengHuoSmsClient {
     pub fn new(config: SmsData) -> Self {
         Self {
             config,
-            settings: SmsSettings::default(),
+            enable_proxy: false,
+            proxy_url: String::new(),
+            proxy_token: String::new(),
         }
     }
 
     /// 以配置 + 全局设置构造（代理需要全局设置）。
     pub fn with_settings(config: SmsData, settings: SmsSettings) -> Self {
-        Self { config, settings }
+        Self::from_settings_ref(config, &settings)
+    }
+
+    /// 只克隆代理三项（供 `create_client_owned` 使用，避免整份 settings 克隆）。
+    pub(crate) fn from_settings_ref(config: SmsData, settings: &SmsSettings) -> Self {
+        Self {
+            config,
+            enable_proxy: settings.enable_proxy,
+            proxy_url: settings.proxy_url.clone(),
+            proxy_token: settings.proxy_token.clone(),
+        }
     }
 
     /// 实际 API 基础地址（确保以 `/sms` 结尾）。
     pub fn base_url(&self) -> String {
-        let mut base = self.config.base_url(FENGHUO_DEFAULT_BASE_URL);
+        let mut base = self.config.extend_view().base_url(FENGHUO_DEFAULT_BASE_URL);
         base = base.trim_end_matches('/').to_string();
         if !base.ends_with("/sms") {
             base.push_str("/sms");
@@ -65,6 +79,7 @@ impl SmsClient for FengHuoSmsClient {
             return invalid_result(Self::NAME, "手机号列表为空");
         }
 
+        let extend = config.extend_view();
         let template_id = request
             .template_id
             .trim()
@@ -72,8 +87,8 @@ impl SmsClient for FengHuoSmsClient {
             .ok()
             .filter(|value| *value > 0)
             .or_else(|| {
-                config
-                    .extend_str("TemplateId")
+                extend
+                    .str("TemplateId")
                     .and_then(|text| text.trim().parse::<i64>().ok())
                     .filter(|value| *value > 0)
             });
@@ -123,31 +138,30 @@ impl SmsClient for FengHuoSmsClient {
         .to_string();
 
         let base = self.base_url();
-        let (url, headers) =
-            if self.settings.enable_proxy && !self.settings.proxy_url.trim().is_empty() {
-                let mut headers = vec![
-                    ("X-Target-Url".to_string(), base.clone()),
-                    (
-                        "Id".to_string(),
-                        dhrust::times::getmilltimestamp().to_string(),
-                    ),
-                ];
-                if !self.settings.proxy_token.trim().is_empty() {
-                    headers.push((
-                        "X-Token-Code".to_string(),
-                        self.settings.proxy_token.trim().to_string(),
-                    ));
-                }
+        let (url, headers) = if self.enable_proxy && !self.proxy_url.trim().is_empty() {
+            let mut headers = vec![
+                ("X-Target-Url".to_string(), base.clone()),
                 (
-                    format!(
-                        "{}/api/sendMessageMass",
-                        self.settings.proxy_url.trim_end_matches('/')
-                    ),
-                    headers,
-                )
-            } else {
-                (format!("{base}/api/sendMessageMass"), Vec::new())
-            };
+                    "Id".to_string(),
+                    dhrust::times::getmilltimestamp().to_string(),
+                ),
+            ];
+            if !self.proxy_token.trim().is_empty() {
+                headers.push((
+                    "X-Token-Code".to_string(),
+                    self.proxy_token.trim().to_string(),
+                ));
+            }
+            (
+                format!(
+                    "{}/api/sendMessageMass",
+                    self.proxy_url.trim_end_matches('/')
+                ),
+                headers,
+            )
+        } else {
+            (format!("{base}/api/sendMessageMass"), Vec::new())
+        };
 
         let response = match http::post(
             &url,
@@ -156,7 +170,7 @@ impl SmsClient for FengHuoSmsClient {
             payload.into_bytes(),
             config.timeout_ms(),
             config.attempts(),
-            config.insecure_tls(),
+            extend.insecure_tls(),
         ) {
             Ok(response) => response,
             Err(error) => return http_failure(Self::NAME, error),

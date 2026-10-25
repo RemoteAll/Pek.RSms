@@ -9,7 +9,7 @@ use std::thread::JoinHandle;
 
 use dhrust::config::TomlConfigStore;
 
-use crate::client::create_client;
+use crate::client::create_client_owned;
 use crate::error::{AccountFailure, SmsError};
 use crate::message::{SmsRequest, SmsResult, SmsType};
 use crate::settings::{SMS_CONFIG_TEMPLATE, SmsData, SmsSettings};
@@ -99,7 +99,7 @@ impl Smser {
             .into_iter()
             .cloned()
             .collect();
-        self.send_accounts(&settings, &accounts, request, sms_type)
+        self.send_accounts(&settings, accounts, request, sms_type)
     }
 
     /// 指定账号 Code 发送（不兜底；失败返回 [`SmsError::Provider`]）。
@@ -109,12 +109,13 @@ impl Smser {
             .find_by_code(code)
             .cloned()
             .ok_or_else(|| SmsError::Config(format!("未找到短信账号：{code}")))?;
-        let client = create_client(&account, &settings)?;
+        let label = account.label().to_string();
+        let client = create_client_owned(account, &settings)?;
         let result = client.send(request);
         if result.success {
             dhrust::info!(
                 "短信发送成功：账号={} 服务商={} 手机号={}",
-                account.label(),
+                label,
                 result.provider,
                 request.mobiles_string()
             );
@@ -122,7 +123,7 @@ impl Smser {
         } else {
             dhrust::warn!(
                 "短信发送失败：账号={} 服务商={} 错误={}",
-                account.label(),
+                label,
                 result.provider,
                 result.message
             );
@@ -148,7 +149,7 @@ impl Smser {
             .into_iter()
             .cloned()
             .collect();
-        self.send_accounts(&settings, &accounts, request, sms_type)
+        self.send_accounts(&settings, accounts, request, sms_type)
     }
 
     /// 异步发送：后台线程执行同步发送（库不引入异步运行时）。
@@ -164,7 +165,7 @@ impl Smser {
     fn send_accounts(
         &self,
         settings: &SmsSettings,
-        accounts: &[SmsData],
+        accounts: Vec<SmsData>,
         request: &SmsRequest,
         sms_type: SmsType,
     ) -> Result<SmsResult, SmsError> {
@@ -177,13 +178,15 @@ impl Smser {
 
         let mut failures = Vec::new();
         for account in accounts {
-            let client = match create_client(account, settings) {
+            let label = account.label().to_string();
+            let provider_name = account.name.clone();
+            let client = match create_client_owned(account, settings) {
                 Ok(client) => client,
                 Err(error) => {
-                    dhrust::warn!("短信账号 {} 初始化失败：{error}", account.label());
+                    dhrust::warn!("短信账号 {label} 初始化失败：{error}");
                     failures.push(AccountFailure {
-                        code: account.label().to_string(),
-                        provider: account.name.clone(),
+                        code: label,
+                        provider: provider_name,
                         provider_code: "InitError".to_string(),
                         message: error.to_string(),
                         raw: String::new(),
@@ -196,7 +199,7 @@ impl Smser {
                 dhrust::info!(
                     "短信发送成功：服务商={} 账号={} 手机号={} 结果={}",
                     result.provider,
-                    account.label(),
+                    label,
                     request.mobiles_string(),
                     result.message
                 );
@@ -204,12 +207,12 @@ impl Smser {
             }
             dhrust::warn!(
                 "短信账号 {}（{}）发送失败：{}，尝试切换下一个",
-                account.label(),
+                label,
                 result.provider,
                 result.message
             );
             failures.push(AccountFailure {
-                code: account.label().to_string(),
+                code: label,
                 provider: result.provider.clone(),
                 provider_code: result.code.clone(),
                 message: result.message.clone(),

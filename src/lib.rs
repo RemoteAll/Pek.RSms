@@ -55,8 +55,10 @@ pub use client::FengHuoSmsClient;
 pub use client::LianLuSmsClient;
 #[cfg(feature = "tencent")]
 pub use client::TencentSmsClient;
-pub use client::{SmsClient, create_client};
+pub use client::{SmsClient, create_client, create_client_owned};
 pub use error::{AccountFailure, SmsError};
 pub use message::{SendStatus, SmsRequest, SmsResult, SmsType, split_phone_numbers};
-pub use settings::{SMS_CONFIG_FILE, SMS_CONFIG_TEMPLATE, SmsData, SmsSettings, SmsSettingsFile};
+pub use settings::{
+    ExtendView, SMS_CONFIG_FILE, SMS_CONFIG_TEMPLATE, SmsData, SmsSettings, SmsSettingsFile,
+};
 pub use smser::Smser;

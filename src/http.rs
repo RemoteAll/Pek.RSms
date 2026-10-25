@@ -1,7 +1,7 @@
 //! HTTP 请求辅助（统一超时/重试/TLS 选项；复用 `dhrust::net::http_client`）。
 //!
-//! 使用 `blocking_request_offthread_with`：即使消费方在 tokio 运行时线程内调用，
-//! 也不会触发“运行时内 block_on”恐慌（dhrust 已固化该包装）。
+//! 使用 `blocking_request_auto_with`：不在 tokio 上下文时直接调用（省线程 + 运行时），
+//! 在 tokio 上下文内才 offthread；dhrust 已固化“运行时内 block_on”防护。
 
 #[cfg(any(
     feature = "aliyun",
@@ -17,7 +17,7 @@ use std::time::Duration;
     feature = "fenghuo",
     feature = "lianlu"
 ))]
-use dhrust::net::http_client::{HttpClientOptions, HttpResponse, blocking_request_offthread_with};
+use dhrust::net::http_client::{HttpClientOptions, HttpResponse, blocking_request_auto_with};
 
 /// POST 请求（带重试）。
 ///
@@ -51,7 +51,7 @@ pub(crate) fn post(
     let attempts = attempts.max(1);
     let mut last_error = String::new();
     for attempt in 0..attempts {
-        match blocking_request_offthread_with(
+        match blocking_request_auto_with(
             "POST",
             url,
             &refs,

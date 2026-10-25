@@ -2,6 +2,13 @@
 //!
 //! 不依赖外部短信平台与网络，CI 可直接运行。
 
+#![cfg(all(
+    feature = "aliyun",
+    feature = "tencent",
+    feature = "fenghuo",
+    feature = "lianlu"
+))]
+
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpListener};
 use std::sync::{Arc, Mutex};

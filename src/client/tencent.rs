@@ -60,12 +60,13 @@ impl SmsClient for TencentSmsClient {
             return invalid_result(Self::NAME, "收信人为空");
         }
 
-        let sdk_app_id = config.extend_str("SdkAppId").unwrap_or_default();
+        let extend = config.extend_view();
+        let sdk_app_id = extend.str("SdkAppId").unwrap_or_default();
         if sdk_app_id.trim().is_empty() {
             return invalid_result(Self::NAME, "ExtendData.SdkAppId 不能为空");
         }
         let template_id = if request.template_id.trim().is_empty() {
-            config.extend_str("TemplateId").unwrap_or_default()
+            extend.str("TemplateId").unwrap_or_default()
         } else {
             request.template_id.clone()
         };
@@ -73,8 +74,8 @@ impl SmsClient for TencentSmsClient {
             return invalid_result(Self::NAME, "模板 ID（TemplateId）不能为空");
         }
 
-        let country_code = config
-            .extend_str("CountryCode")
+        let country_code = extend
+            .str("CountryCode")
             .filter(|text| !text.trim().is_empty())
             .unwrap_or_else(|| "+86".to_string());
         let phones: Vec<String> = request
@@ -113,13 +114,13 @@ impl SmsClient for TencentSmsClient {
         let now = dhrust::times::now_utc();
         let timestamp = now.and_utc().timestamp();
         let date = now.format("%Y-%m-%d").to_string();
-        let url = config.base_url("https://sms.tencentcloudapi.com");
-        let host = config
-            .extend_str("Host")
+        let url = extend.base_url("https://sms.tencentcloudapi.com");
+        let host = extend
+            .str("Host")
             .filter(|text| !text.trim().is_empty())
             .unwrap_or_else(|| url_authority(&url).unwrap_or_else(|| TENCENT_HOST.to_string()));
-        let region = config
-            .extend_str("Region")
+        let region = extend
+            .str("Region")
             .filter(|text| !text.trim().is_empty())
             .unwrap_or_else(|| TENCENT_REGION.to_string());
         let authorization = generate_authorization(
@@ -147,7 +148,7 @@ impl SmsClient for TencentSmsClient {
             payload.into_bytes(),
             config.timeout_ms(),
             config.attempts(),
-            config.insecure_tls(),
+            extend.insecure_tls(),
         ) {
             Ok(response) => response,
             Err(error) => return http_failure(Self::NAME, error),

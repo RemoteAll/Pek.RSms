@@ -54,6 +54,7 @@ impl SmsClient for LianLuSmsClient {
         if content.trim().is_empty() {
             return invalid_result(Self::NAME, "短信内容不能为空（连陆不支持模板发送）");
         }
+        let extend = config.extend_view();
 
         let timestamp = dhrust::times::gettimestamp();
         let sign = dhrust::sign::md5_hex(&format!(
@@ -74,19 +75,9 @@ impl SmsClient for LianLuSmsClient {
             ("time", ""),
             ("messageid", ""),
         ];
-        let body = params
-            .iter()
-            .map(|(key, value)| {
-                format!(
-                    "{}={}",
-                    dhrust::web::url_encode(key),
-                    dhrust::web::url_encode(value)
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("&");
+        let body = dhrust::web::form_encode(params);
 
-        let base = config.base_url(LIANLU_DEFAULT_BASE_URL);
+        let base = extend.base_url(LIANLU_DEFAULT_BASE_URL);
         let url = format!("{}/api/sms/send", base.trim_end_matches('/'));
         let response = match http::post(
             &url,
@@ -95,7 +86,7 @@ impl SmsClient for LianLuSmsClient {
             body.into_bytes(),
             config.timeout_ms(),
             config.attempts(),
-            config.insecure_tls(),
+            extend.insecure_tls(),
         ) {
             Ok(response) => response,
             Err(error) => return http_failure(Self::NAME, error),

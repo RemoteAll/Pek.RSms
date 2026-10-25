@@ -1,5 +1,7 @@
 //! 统一短信请求/结果模型（对应 C# `Pek.Sms.SmsResult` 与《短信事件参数统一规范》）。
 
+use std::collections::HashSet;
+
 /// 短信类型（对应 C# `SmsData.SmsType`）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SmsType {
@@ -106,12 +108,9 @@ impl SmsRequest {
     /// 以手机号列表构造（自动去空白/去重）。
     pub fn from_numbers(numbers: impl IntoIterator<Item = impl Into<String>>) -> Self {
         let mut mobiles = Vec::new();
+        let mut seen = HashSet::new();
         for number in numbers {
-            for part in split_phone_numbers(&number.into()) {
-                if !mobiles.contains(&part) {
-                    mobiles.push(part);
-                }
-            }
+            push_phone_numbers(&number.into(), &mut mobiles, &mut seen);
         }
         Self {
             mobiles,
@@ -228,16 +227,44 @@ impl SmsRequest {
     }
 }
 
-/// 手机号拆分：`,` `;` `|` `，` `；` 分隔，去空白、去重。
+/// 手机号拆分：`,` `;` `|` `，` `；` 分隔，去空白、去重（保持首次出现顺序）。
 pub fn split_phone_numbers(text: &str) -> Vec<String> {
     let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    push_phone_numbers(text, &mut out, &mut seen);
+    out
+}
+
+fn push_phone_numbers(text: &str, out: &mut Vec<String>, seen: &mut HashSet<String>) {
     for part in text.split([',', ';', '|', '，', '；']) {
         let number = part.trim();
-        if !number.is_empty() && !out.iter().any(|existing| existing == number) {
-            out.push(number.to_string());
+        if number.is_empty() {
+            continue;
+        }
+        let owned = number.to_string();
+        if seen.insert(owned.clone()) {
+            out.push(owned);
         }
     }
-    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn split_phone_numbers_dedupes_preserving_order() {
+        assert_eq!(
+            split_phone_numbers("13800138000, 13800138000；13900139000|13800138000"),
+            vec!["13800138000", "13900139000"]
+        );
+    }
+
+    #[test]
+    fn from_numbers_dedupes_across_inputs() {
+        let request = SmsRequest::from_numbers(["a,b", "b,c", "a"]);
+        assert_eq!(request.mobiles, vec!["a", "b", "c"]);
+    }
 }
 
 /// 腾讯云单条发送状态。

@@ -62,8 +62,9 @@ impl SmsClient for AliyunSmsClient {
             return invalid_result(Self::NAME, "收信人超过限制（最多 1000 个）");
         }
 
+        let extend = config.extend_view();
         let template_id = if request.template_id.trim().is_empty() {
-            config.extend_str("TemplateCode").unwrap_or_default()
+            extend.str("TemplateCode").unwrap_or_default()
         } else {
             request.template_id.clone()
         };
@@ -92,12 +93,12 @@ impl SmsClient for AliyunSmsClient {
         let out_id = if !request.out_id.trim().is_empty() {
             request.out_id.clone()
         } else {
-            config.extend_str("OutId").unwrap_or_default()
+            extend.str("OutId").unwrap_or_default()
         };
         if !out_id.trim().is_empty() {
             params.insert("OutId".into(), out_id);
         }
-        if let Some(extend_code) = config.extend_str("SmsUpExtendCode")
+        if let Some(extend_code) = extend.str("SmsUpExtendCode")
             && !extend_code.trim().is_empty()
         {
             params.insert("SmsUpExtendCode".into(), extend_code);
@@ -106,8 +107,12 @@ impl SmsClient for AliyunSmsClient {
         let signature = api_signature(&params, config.access_secret.trim());
         params.insert("Signature".into(), signature);
 
-        let body = form_encode(&params);
-        let url = config.base_url(if config.security {
+        let body = dhrust::web::form_encode(
+            params
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.as_str())),
+        );
+        let url = extend.base_url(if config.security {
             "https://dysmsapi.aliyuncs.com/"
         } else {
             "http://dysmsapi.aliyuncs.com/"
@@ -120,7 +125,7 @@ impl SmsClient for AliyunSmsClient {
             body.into_bytes(),
             config.timeout_ms(),
             config.attempts(),
-            config.insecure_tls(),
+            extend.insecure_tls(),
         ) {
             Ok(response) => response,
             Err(error) => return http_failure(Self::NAME, error),
@@ -140,32 +145,12 @@ pub fn api_signature(params: &BTreeMap<String, String>, access_secret: &str) -> 
 
 /// 待签名字符串（供测试/排查）。
 pub fn string_to_sign(params: &BTreeMap<String, String>) -> String {
-    let canonical = params
-        .iter()
-        .map(|(key, value)| {
-            format!(
-                "{}={}",
-                dhrust::web::url_encode(key),
-                dhrust::web::url_encode(value)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("&");
+    let canonical = dhrust::web::form_encode(
+        params
+            .iter()
+            .map(|(key, value)| (key.as_str(), value.as_str())),
+    );
     format!("POST&%2F&{}", dhrust::web::url_encode(&canonical))
-}
-
-fn form_encode(params: &BTreeMap<String, String>) -> String {
-    params
-        .iter()
-        .map(|(key, value)| {
-            format!(
-                "{}={}",
-                dhrust::web::url_encode(key),
-                dhrust::web::url_encode(value)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("&")
 }
 
 fn iso8601_utc() -> String {

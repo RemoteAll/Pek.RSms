@@ -99,6 +99,116 @@ impl std::fmt::Debug for SmsData {
     }
 }
 
+/// `ExtendData` 的解析视图：**一次解析、多次读取**。
+///
+/// 短信发送时同一份 `ExtendData` 会被读取 2~8 次；此前每次读取都重新
+/// `serde_json::from_str`。客户端应在 `send` 开头构造一次 `ExtendView`，后续
+/// 统一用本类型读取，避免重复解析。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ExtendView {
+    map: serde_json::Map<String, Value>,
+}
+
+impl ExtendView {
+    /// 解析 JSON 对象（空/非法/非对象 → 空视图，不报错）。
+    pub fn parse(text: &str) -> Self {
+        let text = text.trim();
+        if text.is_empty() {
+            return Self::default();
+        }
+        match serde_json::from_str::<Value>(text) {
+            Ok(Value::Object(map)) => Self { map },
+            _ => Self::default(),
+        }
+    }
+
+    /// 原始值。
+    pub fn get(&self, key: &str) -> Option<&Value> {
+        self.map.get(key)
+    }
+
+    /// 读取字符串（数字/布尔自动转字符串）。
+    pub fn str(&self, key: &str) -> Option<String> {
+        self.get(key).and_then(value_to_string)
+    }
+
+    /// 读取布尔值（兼容 `"true"/"1"/"yes"` 文本）。
+    pub fn bool(&self, key: &str) -> Option<bool> {
+        self.get(key).and_then(value_to_bool)
+    }
+
+    /// 读取整数。
+    pub fn i64(&self, key: &str) -> Option<i64> {
+        self.get(key).and_then(value_to_i64)
+    }
+
+    /// 扩展配置的 BaseUrl（未配置时用传入默认值）。
+    pub fn base_url(&self, default: &str) -> String {
+        self.str("BaseUrl")
+            .map(|text| text.trim().to_string())
+            .filter(|text| !text.is_empty())
+            .unwrap_or_else(|| default.to_string())
+    }
+
+    /// 是否跳过 TLS 证书校验（`ExtendData.InsecureTls` / `IgnoreSsl`；默认 false）。
+    pub fn insecure_tls(&self) -> bool {
+        self.bool("InsecureTls")
+            .or_else(|| self.bool("IgnoreSsl"))
+            .unwrap_or(false)
+    }
+
+    /// 转为 `serde_json::Map`（兼容旧 API）。
+    pub fn into_map(self) -> serde_json::Map<String, Value> {
+        self.map
+    }
+
+    /// 是否为空视图。
+    pub fn is_empty(&self) -> bool {
+        self.map.is_empty()
+    }
+}
+
+fn value_to_string(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::Number(number) => Some(number.to_string()),
+        Value::Bool(flag) => Some(flag.to_string()),
+        _ => None,
+    }
+}
+
+fn value_to_bool(value: &Value) -> Option<bool> {
+    match value {
+        Value::Bool(flag) => Some(*flag),
+        Value::Number(number) => number.as_i64().map(|n| n != 0),
+        Value::String(text) => {
+            let text = text.trim();
+            if ["true", "1", "yes", "on"]
+                .iter()
+                .any(|v| text.eq_ignore_ascii_case(v))
+            {
+                Some(true)
+            } else if ["false", "0", "no", "off"]
+                .iter()
+                .any(|v| text.eq_ignore_ascii_case(v))
+            {
+                Some(false)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn value_to_i64(value: &Value) -> Option<i64> {
+    match value {
+        Value::Number(number) => number.as_i64(),
+        Value::String(text) => text.trim().parse().ok(),
+        _ => None,
+    }
+}
+
 impl SmsData {
     /// 日志/错误展示用标识（Code 为空时用服务商名称）。
     pub fn label(&self) -> &str {
@@ -128,61 +238,41 @@ impl SmsData {
         self.retry_times.max(1)
     }
 
+    /// 构造一次解析视图（推荐在 `send` 开头调用一次）。
+    pub fn extend_view(&self) -> ExtendView {
+        ExtendView::parse(&self.extend_data)
+    }
+
     /// 解析 `ExtendData`（JSON 对象；为空或非法时返回空表）。
+    ///
+    /// 需要读取多个键时请改用 [`Self::extend_view`]，避免重复解析。
     pub fn extend_map(&self) -> serde_json::Map<String, Value> {
-        if self.extend_data.trim().is_empty() {
-            return serde_json::Map::new();
-        }
-        match serde_json::from_str::<Value>(&self.extend_data) {
-            Ok(Value::Object(map)) => map,
-            _ => serde_json::Map::new(),
-        }
+        self.extend_view().into_map()
     }
 
     /// 读取扩展项。
     pub fn extend_value(&self, key: &str) -> Option<Value> {
-        self.extend_map().get(key).cloned()
+        self.extend_view().get(key).cloned()
     }
 
     /// 读取扩展字符串（数字/布尔自动转字符串）。
     pub fn extend_str(&self, key: &str) -> Option<String> {
-        self.extend_value(key).and_then(|value| match value {
-            Value::String(text) => Some(text),
-            Value::Number(number) => Some(number.to_string()),
-            Value::Bool(flag) => Some(flag.to_string()),
-            _ => None,
-        })
+        self.extend_view().str(key)
     }
 
     /// 读取扩展布尔值（兼容 `"true"/"1"/"yes"` 文本）。
     pub fn extend_bool(&self, key: &str) -> Option<bool> {
-        self.extend_value(key).and_then(|value| match value {
-            Value::Bool(flag) => Some(flag),
-            Value::Number(number) => number.as_i64().map(|n| n != 0),
-            Value::String(text) => match text.trim().to_ascii_lowercase().as_str() {
-                "true" | "1" | "yes" | "on" => Some(true),
-                "false" | "0" | "no" | "off" => Some(false),
-                _ => None,
-            },
-            _ => None,
-        })
+        self.extend_view().bool(key)
     }
 
     /// 读取扩展整数。
     pub fn extend_i64(&self, key: &str) -> Option<i64> {
-        self.extend_value(key).and_then(|value| match value {
-            Value::Number(number) => number.as_i64(),
-            Value::String(text) => text.trim().parse().ok(),
-            _ => None,
-        })
+        self.extend_view().i64(key)
     }
 
     /// 扩展配置的 BaseUrl（未配置时用传入默认值）。
     pub fn base_url(&self, default: &str) -> String {
-        self.extend_str("BaseUrl")
-            .map(|text| text.trim().to_string())
-            .filter(|text| !text.is_empty())
-            .unwrap_or_else(|| default.to_string())
+        self.extend_view().base_url(default)
     }
 
     /// 是否跳过 TLS 证书校验（`ExtendData.InsecureTls` / `IgnoreSsl`；默认 false）。
@@ -190,9 +280,7 @@ impl SmsData {
     /// 说明：C# 客户端统一 `.IgnoreSsl()`；Rust 版默认校验证书（更安全），
     /// 自签/内网环境显式配置 `"InsecureTls": true` 即可。
     pub fn insecure_tls(&self) -> bool {
-        self.extend_bool("InsecureTls")
-            .or_else(|| self.extend_bool("IgnoreSsl"))
-            .unwrap_or(false)
+        self.extend_view().insecure_tls()
     }
 }
 
@@ -380,5 +468,21 @@ mod tests {
         assert!(!text.contains("super-secret"), "{text}");
         assert!(!text.contains("proxy-secret"), "{text}");
         assert!(text.contains("***"), "{text}");
+    }
+
+    #[test]
+    fn extend_view_reads_typed_values_once() {
+        let data = SmsData {
+            extend_data: r#"{"BaseUrl":" https://example.com ","SdkAppId":1400,"InsecureTls":"yes","TemplateId":"123"}"#.into(),
+            ..SmsData::default()
+        };
+        let view = data.extend_view();
+        assert_eq!(view.str("SdkAppId").as_deref(), Some("1400"));
+        assert_eq!(view.i64("SdkAppId"), Some(1400));
+        assert_eq!(view.bool("InsecureTls"), Some(true));
+        assert_eq!(view.str("TemplateId").as_deref(), Some("123"));
+        assert_eq!(view.base_url("fallback"), "https://example.com");
+        assert!(!view.is_empty());
+        assert!(SmsData::default().extend_view().is_empty());
     }
 }
