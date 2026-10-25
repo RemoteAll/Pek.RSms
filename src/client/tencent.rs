@@ -109,7 +109,9 @@ impl SmsClient for TencentSmsClient {
         let host = extend
             .str("Host")
             .filter(|text| !text.trim().is_empty())
-            .unwrap_or_else(|| url_authority(&url).unwrap_or_else(|| TENCENT_HOST.to_string()));
+            .unwrap_or_else(|| {
+                dhrust::web::url_authority(&url).unwrap_or_else(|| TENCENT_HOST.to_string())
+            });
         let region = extend
             .str("Region")
             .filter(|text| !text.trim().is_empty())
@@ -159,18 +161,6 @@ fn normalize_phone(phone: &str, country_code: &str) -> String {
         format!("+{rest}")
     } else {
         format!("{country_code}{phone}")
-    }
-}
-
-/// 从 URL 提取 authority（`host[:port]`；去掉 userinfo）。
-fn url_authority(url: &str) -> Option<String> {
-    let rest = url.split_once("://").map(|(_, rest)| rest).unwrap_or(url);
-    let authority = rest.split('/').next().unwrap_or_default().trim();
-    let authority = authority.rsplit('@').next().unwrap_or(authority);
-    if authority.is_empty() {
-        None
-    } else {
-        Some(authority.to_string())
     }
 }
 
@@ -325,11 +315,11 @@ mod tests {
         assert_eq!(normalize_phone("008613800138000", "+86"), "+8613800138000");
         assert_eq!(normalize_phone("13800138000", "+86"), "+8613800138000");
         assert_eq!(
-            url_authority("https://user:pass@[::1]:8443/path").as_deref(),
+            dhrust::web::url_authority("https://user:pass@[::1]:8443/path").as_deref(),
             Some("[::1]:8443")
         );
         assert_eq!(
-            url_authority("https://sms.tencentcloudapi.com/api").as_deref(),
+            dhrust::web::url_authority("https://sms.tencentcloudapi.com/api").as_deref(),
             Some("sms.tencentcloudapi.com")
         );
     }

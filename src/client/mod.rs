@@ -93,20 +93,11 @@ pub(crate) fn http_failure(provider: &str, error: impl Into<String>) -> SmsResul
 /// 从 JSON 对象取字符串（数字/布尔转字符串）。
 #[cfg(any(feature = "aliyun", feature = "tencent", feature = "fenghuo"))]
 pub(crate) fn json_text(value: &serde_json::Value, key: &str) -> String {
-    match value.get(key) {
-        Some(serde_json::Value::String(text)) => text.clone(),
-        Some(serde_json::Value::Number(number)) => number.to_string(),
-        Some(serde_json::Value::Bool(flag)) => flag.to_string(),
-        _ => String::new(),
-    }
+    dhrust::json::get_str(value, key).unwrap_or_default()
 }
 
 /// 从 JSON 对象取整数（字符串也尝试解析）。
 #[cfg(feature = "fenghuo")]
 pub(crate) fn json_i64(value: &serde_json::Value, key: &str) -> i64 {
-    match value.get(key) {
-        Some(serde_json::Value::Number(number)) => number.as_i64().unwrap_or_default(),
-        Some(serde_json::Value::String(text)) => text.trim().parse().unwrap_or_default(),
-        _ => 0,
-    }
+    dhrust::json::get_i64(value, key).unwrap_or_default()
 }

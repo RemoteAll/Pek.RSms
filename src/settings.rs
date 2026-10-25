@@ -135,17 +135,17 @@ impl ExtendView {
 
     /// 读取字符串（数字/布尔自动转字符串）。
     pub fn str(&self, key: &str) -> Option<String> {
-        self.get(key).and_then(value_to_string)
+        self.get(key).and_then(dhrust::json::value_to_string)
     }
 
     /// 读取布尔值（兼容 `"true"/"1"/"yes"` 文本）。
     pub fn bool(&self, key: &str) -> Option<bool> {
-        self.get(key).and_then(value_to_bool)
+        self.get(key).and_then(dhrust::json::value_to_bool)
     }
 
     /// 读取整数。
     pub fn i64(&self, key: &str) -> Option<i64> {
-        self.get(key).and_then(value_to_i64)
+        self.get(key).and_then(dhrust::json::value_to_i64)
     }
 
     /// 扩展配置的 BaseUrl（未配置时用传入默认值）。
@@ -171,47 +171,6 @@ impl ExtendView {
     /// 是否为空视图。
     pub fn is_empty(&self) -> bool {
         self.map.is_empty()
-    }
-}
-
-fn value_to_string(value: &Value) -> Option<String> {
-    match value {
-        Value::String(text) => Some(text.clone()),
-        Value::Number(number) => Some(number.to_string()),
-        Value::Bool(flag) => Some(flag.to_string()),
-        _ => None,
-    }
-}
-
-fn value_to_bool(value: &Value) -> Option<bool> {
-    match value {
-        Value::Bool(flag) => Some(*flag),
-        Value::Number(number) => number.as_i64().map(|n| n != 0),
-        Value::String(text) => {
-            let text = text.trim();
-            if ["true", "1", "yes", "on"]
-                .iter()
-                .any(|v| text.eq_ignore_ascii_case(v))
-            {
-                Some(true)
-            } else if ["false", "0", "no", "off"]
-                .iter()
-                .any(|v| text.eq_ignore_ascii_case(v))
-            {
-                Some(false)
-            } else {
-                None
-            }
-        }
-        _ => None,
-    }
-}
-
-fn value_to_i64(value: &Value) -> Option<i64> {
-    match value {
-        Value::Number(number) => number.as_i64(),
-        Value::String(text) => text.trim().parse().ok(),
-        _ => None,
     }
 }
 
@@ -249,13 +208,10 @@ impl SmsData {
         match self.try_extend_view() {
             Ok(view) => view,
             Err(error) => {
-                static WARNED: std::sync::Once = std::sync::Once::new();
-                WARNED.call_once(|| {
-                    dhrust::warn!(
-                        "短信账号 {} 的 ExtendData 无法解析（按空配置处理）：{error}",
-                        self.label()
-                    );
-                });
+                dhrust::warn_once!(
+                    "短信账号 {} 的 ExtendData 无法解析（按空配置处理）：{error}",
+                    self.label()
+                );
                 ExtendView::default()
             }
         }
