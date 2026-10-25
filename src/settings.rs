@@ -20,7 +20,7 @@ pub const SMS_CONFIG_FILE: &str = "Config/Sms.toml";
 pub const SMS_CONFIG_TEMPLATE: &str = include_str!("../res/Sms.toml.template");
 
 /// 短信账号（对应 C# `Pek.Sms.SmsData`）。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, rename_all = "PascalCase")]
 pub struct SmsData {
     /// 惟一标识
@@ -74,6 +74,28 @@ impl Default for SmsData {
             extend_fields: String::new(),
             extend_data: String::new(),
         }
+    }
+}
+
+impl std::fmt::Debug for SmsData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SmsData")
+            .field("code", &self.code)
+            .field("name", &self.name)
+            .field("display_name", &self.display_name)
+            .field("sms_type", &self.sms_type)
+            .field("is_default", &self.is_default)
+            .field("is_enabled", &self.is_enabled)
+            .field("access_key", &self.access_key)
+            .field("access_secret", &"***")
+            .field("sign_name", &self.sign_name)
+            .field("order", &self.order)
+            .field("timeout", &self.timeout)
+            .field("security", &self.security)
+            .field("retry_times", &self.retry_times)
+            .field("extend_fields", &self.extend_fields)
+            .field("extend_data", &self.extend_data)
+            .finish()
     }
 }
 
@@ -175,7 +197,7 @@ impl SmsData {
 }
 
 /// 短信设置（对应 C# `Pek.Sms.SmsSettings`）。
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, rename_all = "PascalCase")]
 pub struct SmsSettings {
     /// 短信账号
@@ -186,6 +208,17 @@ pub struct SmsSettings {
     pub proxy_url: String,
     /// 代理认证令牌（`X-Token-Code`）
     pub proxy_token: String,
+}
+
+impl std::fmt::Debug for SmsSettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SmsSettings")
+            .field("data", &self.data)
+            .field("enable_proxy", &self.enable_proxy)
+            .field("proxy_url", &self.proxy_url)
+            .field("proxy_token", &"***")
+            .finish()
+    }
 }
 
 impl SmsSettings {
@@ -324,5 +357,28 @@ impl SmsSettingsFile {
         self.config
             .save_with_arrays(&[("Data", &entries)])
             .map_err(|e| SmsError::Config(format!("保存短信配置失败：{e}")))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debug_redacts_access_secret_and_proxy_token() {
+        let data = SmsData {
+            code: "aliyun".into(),
+            access_secret: "super-secret".into(),
+            ..SmsData::default()
+        };
+        let settings = SmsSettings {
+            data: vec![data],
+            proxy_token: "proxy-secret".into(),
+            ..SmsSettings::default()
+        };
+        let text = format!("{settings:?}");
+        assert!(!text.contains("super-secret"), "{text}");
+        assert!(!text.contains("proxy-secret"), "{text}");
+        assert!(text.contains("***"), "{text}");
     }
 }

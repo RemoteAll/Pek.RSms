@@ -4,13 +4,15 @@
 //! 同一 `SmsType` 的已启用账号按 `Order` 升序依次尝试，失败自动切换下一家。
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::Arc;
 use std::thread::JoinHandle;
+
+use dhrust::config::TomlConfigStore;
 
 use crate::client::create_client;
 use crate::error::{AccountFailure, SmsError};
 use crate::message::{SmsRequest, SmsResult, SmsType};
-use crate::settings::{SmsData, SmsSettings, SmsSettingsFile};
+use crate::settings::{SMS_CONFIG_TEMPLATE, SmsData, SmsSettings};
 
 /// 短信外观。
 ///
@@ -26,18 +28,15 @@ use crate::settings::{SmsData, SmsSettings, SmsSettingsFile};
 /// # Ok::<(), pek_rsms::SmsError>(())
 /// ```
 pub struct Smser {
-    file: Option<Mutex<SmsSettingsFile>>,
-    settings: Arc<RwLock<SmsSettings>>,
+    /// 配置文件句柄 + 共享配置快照（纯内存模式 = 不读写磁盘）
+    store: TomlConfigStore<SmsSettings>,
 }
 
 impl Smser {
     /// 打开指定配置文件（不存在时按模板生成）。
     pub fn open(path: impl AsRef<Path>) -> Self {
-        let file = SmsSettingsFile::load(path);
-        let settings = Arc::new(RwLock::new(file.settings().clone()));
         Self {
-            file: Some(Mutex::new(file)),
-            settings,
+            store: TomlConfigStore::open(path, SMS_CONFIG_TEMPLATE),
         }
     }
 
@@ -49,70 +48,45 @@ impl Smser {
     /// 直接以内存配置构造（不读写磁盘；测试或动态配置场景）。
     pub fn with_settings(settings: SmsSettings) -> Self {
         Self {
-            file: None,
-            settings: Arc::new(RwLock::new(settings)),
+            store: TomlConfigStore::in_memory(settings),
         }
     }
 
     /// 配置文件路径（纯内存模式返回 `None`）。
     pub fn config_path(&self) -> Option<PathBuf> {
-        self.file.as_ref().map(|file| {
-            file.lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .path()
-                .to_path_buf()
-        })
+        self.store.path().map(Path::to_path_buf)
     }
 
     /// 当前配置快照。
     pub fn settings(&self) -> SmsSettings {
-        self.settings
-            .read()
-            .map(|settings| settings.clone())
-            .unwrap_or_default()
+        self.store.value()
     }
 
     /// 加载期提示（配置生成/补齐/迁移等；纯内存模式为空）。
     pub fn take_notes(&self) -> Vec<String> {
-        self.file
-            .as_ref()
-            .map(|file| {
-                file.lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .take_notes()
-            })
-            .unwrap_or_default()
+        self.store.take_notes()
     }
 
     /// 外部修改配置后热加载；返回提示文本（空 = 未变化/纯内存模式）。
     pub fn reload_if_changed(&self) -> Vec<String> {
-        let Some(file_handle) = self.file.as_ref() else {
-            return Vec::new();
-        };
-        let mut file = file_handle
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let notes = file.reload_if_changed();
-        if !notes.is_empty() {
-            self.replace_settings(file.settings().clone());
-            for note in &notes {
-                dhrust::info!("短信配置：{note}");
-            }
+        let notes = self.store.reload_if_changed();
+        for note in &notes {
+            dhrust::info!("短信配置：{note}");
         }
         notes
     }
 
     /// 保存新配置（写回 TOML，含 `[[Data]]`）并立即生效；纯内存模式只更新内存。
     pub fn save_settings(&self, settings: SmsSettings) -> Result<(), SmsError> {
-        if let Some(file_handle) = self.file.as_ref() {
-            let mut file = file_handle
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            *file.settings_mut() = settings.clone();
-            file.save()?;
-        }
-        self.replace_settings(settings);
-        Ok(())
+        let entries: Vec<serde_json::Value> = settings
+            .data
+            .iter()
+            .map(serde_json::to_value)
+            .collect::<Result<_, _>>()
+            .map_err(|error| SmsError::Config(format!("序列化账号失败：{error}")))?;
+        self.store
+            .save(settings, &[("Data", &entries)])
+            .map_err(|error| SmsError::Config(format!("保存短信配置失败：{error}")))
     }
 
     /// 按 `SmsType` 发送：所有已启用账号按 `Order` 升序兜底，成功即返回。
@@ -248,10 +222,29 @@ impl Smser {
             failures,
         })
     }
+}
 
-    fn replace_settings(&self, settings: SmsSettings) {
-        if let Ok(mut guard) = self.settings.write() {
-            *guard = settings;
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reload_if_changed_refreshes_shared_settings() {
+        let dir = std::env::temp_dir().join(format!("pek-rsms-reload-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let smser = Smser::open_in(&dir);
+        let path = smser.config_path().expect("文件模式");
+        let text = std::fs::read_to_string(&path).expect("读配置");
+        let updated = text.replace("ProxyUrl = \"\"", "ProxyUrl = \"http://127.0.0.1:9\"");
+        assert_ne!(text, updated, "模板应包含 ProxyUrl");
+        std::fs::write(&path, updated).expect("写外部修改");
+
+        let notes = smser.reload_if_changed();
+        assert!(
+            notes.iter().any(|note| note.contains("热加载")),
+            "{notes:?}"
+        );
+        assert_eq!(smser.settings().proxy_url, "http://127.0.0.1:9");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
